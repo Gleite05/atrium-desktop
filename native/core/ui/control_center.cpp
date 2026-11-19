@@ -28,6 +28,7 @@ namespace {
 constexpr float kW = 340, kGap = 10, kTopH = 150, kSliderH = 68, kHeader = 58, kRowH = 44, kFooter = 46, kPad = 14;
 constexpr float kSection = 30, kAppRowH = 50, kModeH = 78;
 constexpr float kStageH = 58; // Stage Manager's row, under the connections
+constexpr float kVpnH = 58;   // the VPN row, under Stage Manager's
 constexpr int kMaxRows = 6, kMaxOutputs = 4, kMaxApps = 5, kMaxDisplays = 4;
 constexpr UINT_PTR kStatusTimer = 1;
 constexpr double kPageMs = 320;
@@ -40,6 +41,13 @@ constexpr UINT WM_CC_DISPLAYS = WM_APP + 0x55; // the wireless displays in range
 constexpr UINT WM_CC_PROJECTED = WM_APP + 0x56; // wParam 1 projecting, 0 refused; lParam std::wstring* the display (null: stopped)
 constexpr UINT WM_CC_RADIO_SET = WM_APP + 0x57;
 constexpr UINT WM_CC_OUTPUT_SET = WM_APP + 0x58;
+constexpr UINT WM_CC_VPN = WM_APP + 0x59; // lParam VpnDone*
+
+struct VpnDone {
+    std::wstring name;
+    bool connect = false;
+    int code = 0;
+};
 
 struct RadioRead {
     unsigned gen = 0;
@@ -100,7 +108,7 @@ ControlCenter::ControlCenter(HINSTANCE instance) : surface_(instance, L"Atrium C
     ReadRadios(false); // the brightness (WMI is slow) before the first opening
 }
 
-float ControlCenter::MainHeight() const { return kTopH + kGap + kStageH + kGap + kSliderH + kGap + kSliderH; }
+float ControlCenter::MainHeight() const { return kTopH + kGap + kStageH + kGap + kVpnH + kGap + kSliderH + kGap + kSliderH; }
 
 float ControlCenter::PageHeight(Page page) const
 {
@@ -110,6 +118,8 @@ float ControlCenter::PageHeight(Page page) const
     }
     if (page == Page::Cast)
         return kHeader + float(std::clamp(int(displays_.size()), 1, kMaxDisplays)) * kRowH + kSection + kModeH + kFooter + 6;
+    if (page == Page::Vpn)
+        return kHeader + float(std::clamp(int(vpns_.size()), 1, kMaxRows)) * kRowH + kFooter + 6;
     size_t n = page == Page::Wifi ? networks_.size() : devices_.size();
     bool off = page == Page::Wifi ? radiosRead_ && !radios_.wifiOn : !radios_.btOn;
     int rows = off ? 1 : std::clamp(int(n), 1, kMaxRows);
@@ -118,7 +128,7 @@ float ControlCenter::PageHeight(Page page) const
 
 float ControlCenter::MaxHeight() const
 {
-    return std::max({kTopH + kGap + kStageH + 2 * (kGap + kSliderH), kHeader + float(kMaxRows) * kRowH + kFooter + 6,
+    return std::max({kTopH + kGap + kStageH + kGap + kVpnH + 2 * (kGap + kSliderH), kHeader + float(kMaxRows) * kRowH + kFooter + 6,
                      kHeader + float(kMaxOutputs) * kRowH + kSection + float(kMaxApps) * kAppRowH + kFooter + 6,
                      kHeader + float(kMaxDisplays) * kRowH + kSection + kModeH + kFooter + 6});
 }
@@ -134,6 +144,8 @@ std::vector<ShapeDip> ControlCenter::MainShapes() const
     s.push_back({D2D1::RectF(colW + kGap, (kTopH - kGap) / 2 + kGap, kW, kTopH), modR});
     s.push_back({D2D1::RectF(0, kTopH + kGap, kW, kTopH + kGap + kStageH), modR});
     float y = kTopH + kGap + kStageH + kGap;
+    s.push_back({D2D1::RectF(0, y, kW, y + kVpnH), modR});
+    y += kVpnH + kGap;
     s.push_back({D2D1::RectF(0, y, kW, y + kSliderH), modR});
     y += kSliderH + kGap;
     s.push_back({D2D1::RectF(0, y, kW, y + kSliderH), modR});
@@ -173,8 +185,44 @@ void ControlCenter::Open(RECT anchor, RECT bar)
     ReadRadios(true);
     ReadAudio(true); // ready for the sound's page
     Scan(false); // what the adapter already knows, ready for the Wi-Fi page
+    ReadVpn();
     SetTimer(surface_.Hwnd(), kStatusTimer, 1500, nullptr);
     Log(L"control: opened");
+}
+
+void ControlCenter::OpenVpn(RECT anchor, RECT bar)
+{
+    Open(anchor, bar);
+    page_ = fromPage_ = Page::Vpn;
+    pageDir_ = 0;
+    shownH_ = fromH_ = toH_ = PageHeight(Page::Vpn);
+    surface_.Invalidate();
+}
+
+void ControlCenter::ReadVpn()
+{
+    vpns_ = ListVpn();
+    vpnRead_ = true;
+    surface_.Invalidate();
+}
+
+void ControlCenter::ToggleVpn(size_t index)
+{
+    if (index >= vpns_.size() || vpnBusy_.contains(vpns_[index].name))
+        return;
+    const VpnEntry e = vpns_[index];
+    const bool connect = !e.connected;
+    vpnBusy_[e.name] = connect ? Tr(L"Connecting…") : Tr(L"Disconnecting…");
+    vpnError_.erase(e.name);
+    surface_.Invalidate();
+    HWND h = surface_.Hwnd();
+    std::thread([h, e, connect] {
+        auto done = std::make_unique<VpnDone>();
+        done->name = e.name;
+        done->connect = connect;
+        done->code = connect ? ConnectVpn(e.name) : DisconnectVpn(e.name);
+        PostOwned(h, WM_CC_VPN, 0, std::move(done));
+    }).detach();
 }
 
 bool ControlCenter::ReleasePointer(bool releaseCapture)
@@ -368,6 +416,8 @@ void ControlCenter::PaintPage(Canvas& c, const Theme& t, Page page)
         PaintBluetooth(c, t, card);
     else if (page == Page::Sound)
         PaintSound(c, t, card);
+    else if (page == Page::Vpn)
+        PaintVpn(c, t, card);
     else
         PaintCast(c, t, card);
 }
@@ -461,6 +511,8 @@ void ControlCenter::PaintMain(Canvas& c, const Theme& t)
     const D2D1_RECT_F cast = D2D1::RectF(colW + kGap, batt.bottom + kGap, kW, kTopH);
     const D2D1_RECT_F stage = D2D1::RectF(0, kTopH + kGap, kW, kTopH + kGap + kStageH);
     float y = stage.bottom + kGap;
+    const D2D1_RECT_F vpn = D2D1::RectF(0, y, kW, y + kVpnH);
+    y = vpn.bottom + kGap;
     const D2D1_RECT_F bright = D2D1::RectF(0, y, kW, y + kSliderH);
     y = bright.bottom + kGap;
     const D2D1_RECT_F sound = D2D1::RectF(0, y, kW, y + kSliderH);
@@ -564,6 +616,33 @@ void ControlCenter::PaintMain(Canvas& c, const Theme& t)
         c.Text(stageOn_ ? (stageRight_ ? Tr(L"On · recent apps on the right") : Tr(L"On · recent apps on the left")) : Tr(L"Off"),
                D2D1::RectF(cx + 28, cy, stage.right - kPad, cy + 18), 11.5f, t.subtext);
         hits_.push_back({stage, L"stage"});
+    }
+    // VPN: Windows' VPN connections, lit while one is connected; the row opens their page.
+    {
+        std::wstring on;
+        if (vpnRead_) {
+            for (const VpnEntry& e : vpns_)
+                if (e.connected)
+                    on += (on.empty() ? L"" : L", ") + e.name;
+        } else {
+            on = status_.vpn;
+        }
+        float vh = Hover(c, L"vpn", hover_ == L"vpn");
+        if (vh > 0.001f || pressed_ == L"vpn")
+            c.Fill(vpn, modR, pressed_ == L"vpn" ? t.press : Alpha(t.hover, vh));
+        float cx = vpn.left + 32, cy = (vpn.top + vpn.bottom) / 2;
+        c.Circle(cx, cy, 18, !on.empty() ? t.accent : Alpha(t.text, 0.16f + 0.08f * vh));
+        bool halo = c.halo;
+        c.halo = false;
+        c.Glyph(L"", D2D1::RectF(cx - 14, cy - 14, cx + 14, cy + 14), 14, !on.empty() ? D2D1::ColorF(1, 1, 1, 0.98f) : t.text);
+        c.halo = halo;
+        c.Text(L"VPN", D2D1::RectF(cx + 28, cy - 18, vpn.right - kPad - 20, cy), 13.5f, t.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+        std::wstring sub = !on.empty()                ? (private_ ? std::wstring(Tr(L"Connected")) : on) :
+                           vpnRead_ && vpns_.empty() ? std::wstring(Tr(L"No VPN connections")) :
+                                                       std::wstring(Tr(L"Not connected"));
+        c.Text(sub, D2D1::RectF(cx + 28, cy, vpn.right - kPad - 20, cy + 18), 11.5f, on.empty() ? t.subtext : t.accent);
+        c.Glyph(L"", D2D1::RectF(vpn.right - kPad - 16, cy - 8, vpn.right - kPad, cy + 8), 9.5f, t.subtext);
+        hits_.push_back({vpn, L"vpn"});
     }
     PaintSlider(c, t, bright, L"bright", Tr(L"Displays"), L"\uE706", std::max(brightness_, 0), false,
                 CanSetBrightness() ? std::to_wstring(brightness_) + L"%" :
@@ -981,6 +1060,66 @@ void ControlCenter::PaintCast(Canvas& c, const Theme& t, D2D1_RECT_F card)
     Link(c, t, L"castpanel", Tr(L"System cast panel"), w / 2 + 18, w - kPad + 4, y, 2);
 }
 
+// Windows' VPN connections, after the Wi-Fi page: one row each, connected ones
+// lit; a click connects (or disconnects) it.
+void ControlCenter::PaintVpn(Canvas& c, const Theme& t, D2D1_RECT_F card)
+{
+    const float w = card.right - card.left;
+    float right = PaintHeader(c, t, card, L"VPN", false, L"");
+    {
+        D2D1_RECT_F again = D2D1::RectF(right - 30, card.top + kHeader / 2 - 15, right, card.top + kHeader / 2 + 15);
+        float rh = Hover(c, L"vpnread", hover_ == L"vpnread");
+        if (rh > 0.001f)
+            c.Fill(again, 15, Alpha(t.hover, rh));
+        c.Glyph(vpnBusy_.empty() ? L"" : L"", again, 12, t.subtext);
+        hits_.push_back({again, L"vpnread"});
+    }
+    float y = card.top + kHeader;
+    if (vpns_.empty()) {
+        c.Text(vpnRead_ ? Tr(L"No VPN connections") : Tr(L"Reading…"), D2D1::RectF(kPad, y, w - kPad, y + kRowH), 13, t.subtext, DWRITE_FONT_WEIGHT_NORMAL, 1);
+        y += kRowH;
+    }
+    for (int i = 0; i < kMaxRows && i < int(vpns_.size()); ++i) {
+        const VpnEntry& e = vpns_[size_t(i)];
+        D2D1_RECT_F row = D2D1::RectF(kPad - 4, y + 2, w - kPad + 4, y + kRowH - 2);
+        std::wstring id = L"vpn:" + std::to_wstring(i);
+        float hv = Hover(c, id, hover_ == id);
+        if (hv > 0.001f)
+            c.Fill(row, (row.bottom - row.top) / 2, Alpha(pressed_ == id ? t.press : t.hover, hv));
+        float cy = (row.top + row.bottom) / 2;
+        D2D1_RECT_F disc = D2D1::RectF(row.left + 8, cy - 14, row.left + 36, cy + 14);
+        c.Circle((disc.left + disc.right) / 2, cy, 14, e.connected ? t.accent : Alpha(t.text, 0.14f));
+        bool halo = c.halo;
+        c.halo = false;
+        c.Glyph(L"", disc, 12, e.connected ? D2D1::ColorF(1, 1, 1, 0.98f) : t.text);
+        c.halo = halo;
+        std::wstring name = private_ ? TrFormat(L"VPN %d", i + 1) : e.name;
+        const auto busy = vpnBusy_.find(e.name);
+        const auto error = vpnError_.find(e.name);
+        const bool status = busy != vpnBusy_.end() || error != vpnError_.end();
+        if (status) {
+            c.Text(name, D2D1::RectF(disc.right + 10, cy - 17, row.right - 12, cy + 1), 13, t.text,
+                   e.connected ? DWRITE_FONT_WEIGHT_SEMI_BOLD : DWRITE_FONT_WEIGHT_NORMAL);
+            c.Text(busy != vpnBusy_.end() ? busy->second : error->second, D2D1::RectF(disc.right + 10, cy, row.right - 12, cy + 16), 11,
+                   busy != vpnBusy_.end() ? t.subtext : D2D1::ColorF(0xFF453A));
+        } else {
+            c.Text(name, D2D1::RectF(disc.right + 10, row.top, row.right - 96, row.bottom), 13.5f, t.text,
+                   e.connected ? DWRITE_FONT_WEIGHT_SEMI_BOLD : DWRITE_FONT_WEIGHT_NORMAL);
+            const float r = row.right - 12;
+            if (e.connected && hv > 0.05f)
+                c.Text(Tr(L"Disconnect"), D2D1::RectF(r - 90, row.top, r, row.bottom), 12, Alpha(t.text, hv), DWRITE_FONT_WEIGHT_NORMAL, 2);
+            else if (e.connected)
+                c.Text(Tr(L"Connected"), D2D1::RectF(r - 90, row.top, r, row.bottom), 12, t.accent, DWRITE_FONT_WEIGHT_SEMI_BOLD, 2);
+            else if (hv > 0.05f)
+                c.Text(Tr(L"Connect"), D2D1::RectF(r - 90, row.top, r, row.bottom), 12, Alpha(t.subtext, hv), DWRITE_FONT_WEIGHT_NORMAL, 2);
+        }
+        hits_.push_back({row, id});
+        y += kRowH;
+    }
+    c.Line(kPad + 4, y + 2, w - kPad - 4, y + 2, t.divider);
+    Link(c, t, L"vpnsettings", Tr(L"VPN settings"), kPad - 4, w / 2 + 20, y, 0);
+}
+
 std::wstring ControlCenter::HitAt(POINT pt) const
 {
     // The hits are the page's own coordinates: it hangs from the glass's top.
@@ -988,6 +1127,7 @@ std::wstring ControlCenter::HitAt(POINT pt) const
     // Small controls first: they sit on larger rows.
     for (const Hit& h : hits_)
         if ((h.id == L"disconnect" || h.id == L"mute" || h.id == L"wifi" || h.id == L"bt" || h.id == L"rescan" || h.id == L"castoff" || h.id == L"castscan" ||
+             h.id == L"vpnread" ||
              h.id.starts_with(L"amute:")) &&
             In(h.rect, x, y))
             return h.id;
@@ -1172,8 +1312,22 @@ void ControlCenter::Activate(const std::wstring& id)
     } else if (id == L"battery") {
         Close();
         OpenUri(status_.battery ? L"ms-settings:batterysaver" : L"ms-settings:powersleep");
+    } else if (id == L"vpn") {
+        ShowPage(Page::Vpn);
+        ReadVpn();
+    } else if (id == L"vpnread") {
+        ReadVpn();
+    } else if (id.starts_with(L"vpn:")) {
+        ToggleVpn(size_t(std::stoul(id.substr(4))));
+    } else if (id == L"vpnsettings") {
+        Close();
+        OpenUri(L"ms-settings:network-vpn");
     }
-    Log(L"control: %s", id.starts_with(L"net:") ? L"connect" : id.starts_with(L"bt:") ? L"device" : id.starts_with(L"disp:") ? L"project" : id.c_str());
+    Log(L"control: %s", id.starts_with(L"net:")  ? L"connect" :
+                        id.starts_with(L"bt:")   ? L"device" :
+                        id.starts_with(L"disp:") ? L"project" :
+                        id.starts_with(L"vpn:")  ? L"vpn" :
+                                                   id.c_str());
 }
 
 void ControlCenter::SetStage(bool on, bool onRight)
@@ -1214,9 +1368,29 @@ bool ControlCenter::Message(UINT m, WPARAM w, LPARAM l, LRESULT& /*result*/)
                 ReadAudio(false);
             if (page_ == Page::Cast)
                 ReadMode();
+            if (page_ == Page::Vpn || page_ == Page::Main)
+                ReadVpn();
             return true;
         }
         return false;
+    case WM_CC_VPN: {
+        auto done = TakePosted<VpnDone>(l);
+        vpnBusy_.erase(done->name);
+        if (done->connect && done->code != 0) {
+            if (VpnNeedsInput(done->code)) {
+                // No saved credentials (or refused): Windows' own dialog asks for them.
+                vpnError_[done->name] = Tr(L"Enter your sign-in info");
+                PromptVpn(done->name);
+            } else {
+                vpnError_[done->name] = VpnError(done->code);
+            }
+        }
+        if (surface_.Visible())
+            ReadVpn();
+        if (onChanged)
+            onChanged(); // the bar's VPN entry
+        return true;
+    }
     case WM_CC_RADIO_SET:
         radioWriteBusy_ = false;
         wifiWriteDone_ |= w != 0;

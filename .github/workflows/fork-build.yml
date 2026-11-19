@@ -1,0 +1,28 @@
+name: fork-build
+
+# Builds Atrium.exe only (the fork's native changes: the VPN entry and page); the settings app is the upstream one.
+on:
+  push:
+    branches: [vpn]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build Atrium.exe
+        shell: pwsh
+        run: |
+          cmake --preset win-x64 -S native -B native/build/win-x64 -DATRIUM_DEVELOPMENT=OFF -DATRIUM_BUILD_TESTS=OFF
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cmake --build native/build/win-x64 --config Release
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Atrium-exe
+          path: native/build/win-x64/Release/Atrium.exe
+          if-no-files-found: error

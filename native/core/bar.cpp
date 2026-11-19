@@ -54,6 +54,7 @@ constexpr wchar_t kImeKey[] = L"#ime";
 constexpr wchar_t kStatusKey[] = L"#status";
 constexpr wchar_t kMoreKey[] = L"#more";
 constexpr wchar_t kDesktopKey[] = L"#desktop";
+constexpr wchar_t kVpnKey[] = L"#vpn";
 // Bar entries and the clock start with '#'; app keys are AUMIDs or paths.
 bool IsEntry(const std::wstring& key) { return !key.empty() && key[0] == L'#'; }
 constexpr double kInsetDip = 14; // room for the drop shadow around the shape
@@ -734,6 +735,8 @@ LRESULT Bar::OnInput(HWND h, UINT m, WPARAM w, LPARAM l)
                 onStartClick(anchor);
             else if (key == kNotifyKey && onNotifyClick)
                 onNotifyClick(anchor);
+            else if (key == kVpnKey && onVpnClick)
+                onVpnClick(anchor);
             else if (key == kTrayKey && onTrayClick)
                 onTrayClick(anchor);
             else if (key == kDesktopKey && onDesktopClick)
@@ -1037,6 +1040,7 @@ void Bar::Relayout()
     const bool showStatus = showRight && st.showStatus;
     const bool showNotifications = showRight && st.showNotifications;
     const bool showDesktop = showRight && st.showDesktop;
+    const bool showVpn = showRight && st.showVpn;
 
     // Metrics (px). Every icon sits centred on a square plate (press and drag
     // feedback); the plate has the same gap `v` to the top and bottom edge,
@@ -1071,7 +1075,7 @@ void Bar::Relayout()
     const int statusExtra = st.statusStyle == L"icons" ? int(std::lround(icon * 1.3f)) : 0;
     // Show Desktop: a narrow slot at the bar's right end, a thin line in it, as the system taskbar's.
     const int deskW = showDesktop ? std::max(Px(10, s), int(std::lround(icon * 0.45))) : 0;
-    const int rightCount = int(showTray) + int(showIme) + int(showStatus) + int(showNotifications) + int(clockW != 0) + int(showDesktop);
+    const int rightCount = int(showTray) + int(showIme) + int(showStatus) + int(showVpn) + int(showNotifications) + int(clockW != 0) + int(showDesktop);
     const int groupGap = rightCount ? sepGap : 0;
     const int total = int(items_.size());
     int n = total;
@@ -1082,7 +1086,8 @@ void Bar::Relayout()
         int w = 2 * padFor(p) + p + 2 * g;               // logo and the air after it
         w += slots ? slots * p + (slots - 1) * g : 0;    // apps
         if (rightCount)
-            w += 2 * sepGap + p * (int(showTray) + int(showIme) + int(showStatus) + int(showNotifications)) + (showStatus ? statusExtra : 0) + clockW + deskW +
+            w += 2 * sepGap + p * (int(showTray) + int(showIme) + int(showStatus) + int(showVpn) + int(showNotifications)) + (showStatus ? statusExtra : 0) + clockW +
+                 deskW +
                  (rightCount - 1) * g;
         return std::max(w, barH * 2);
     };
@@ -1225,6 +1230,7 @@ void Bar::Relayout()
     };
     const int deskLeft = rightSlot(deskW, showDesktop);
     const int bellLeft = rightSlot(plate, showNotifications);
+    const int vpnLeft = rightSlot(plate, showVpn);
     const int clockLeft = rightSlot(clockW, clockW != 0), clockRight = clockLeft + clockW;
     const int statusLeft = rightSlot(statusW, showStatus), statusRight = statusLeft + statusW;
     const int imeLeft = rightSlot(plate, showIme);
@@ -1310,6 +1316,13 @@ void Bar::Relayout()
         scene.timePx = timePx;
         scene.datePx = datePx;
         hits_.push_back({kClockKey, RECT{clockLeft - gap / 2, hitTop, clockRight + gap / 2, hitBottom}});
+    }
+    if (showVpn) {
+        // Windows' VPN connections: the shield, a green dot on it while one is connected.
+        SceneItem vpn = entry(kVpnKey, vpnLeft, L"\uE705");
+        vpn.lit = !status_.vpn.empty();
+        scene.extras.push_back(std::move(vpn));
+        hits_.push_back({kVpnKey, RECT{vpnLeft - gap / 2, hitTop, vpnLeft + plate + gap / 2, hitBottom}});
     }
     if (showNotifications) {
         SceneItem bell = entry(kNotifyKey, bellLeft, L"\uEA8F");
@@ -1746,9 +1759,13 @@ void Bar::SetStatus(const SystemStatus& status)
 {
     if (status == status_)
         return;
+    const bool vpnChanged = status.vpn.empty() != status_.vpn.empty();
     status_ = status;
     scene_.status = status;
-    Publish();
+    if (vpnChanged)
+        Relayout(); // the VPN entry's dot
+    else
+        Publish();
     UpdateTooltips();
 }
 
@@ -1804,6 +1821,8 @@ std::wstring Bar::TooltipText(const std::wstring& key) const
         return Tr(L"Input method");
     if (key == kDesktopKey)
         return Tr(L"Show Desktop");
+    if (key == kVpnKey)
+        return status_.vpn.empty() ? Tr(L"VPN · not connected") : TrFormat(L"VPN · %s", status_.vpn.c_str());
     if (key == kStatusKey) {
         const SystemStatus& st = status_;
         std::wstring net;

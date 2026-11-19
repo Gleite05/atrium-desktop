@@ -129,6 +129,7 @@ std::wstring Settings::ToJson() const
     o.SetNamedValue(L"showStatus", json::JsonValue::CreateBooleanValue(showStatus));
     o.SetNamedValue(L"showNotifications", json::JsonValue::CreateBooleanValue(showNotifications));
     o.SetNamedValue(L"showDesktop", json::JsonValue::CreateBooleanValue(showDesktop));
+    o.SetNamedValue(L"showVpn", json::JsonValue::CreateBooleanValue(showVpn));
     o.SetNamedValue(L"autoWidth", json::JsonValue::CreateBooleanValue(autoWidth));
     o.SetNamedValue(L"showRunning", json::JsonValue::CreateBooleanValue(showRunning));
     o.SetNamedValue(L"language", json::JsonValue::CreateStringValue(language));
@@ -248,6 +249,7 @@ bool Settings::FromJson(const std::wstring& text, const Settings& base, Settings
     flag(L"showStatus", s.showStatus);
     flag(L"showNotifications", s.showNotifications);
     flag(L"showDesktop", s.showDesktop);
+    flag(L"showVpn", s.showVpn);
     flag(L"autoWidth", s.autoWidth);
     flag(L"showRunning", s.showRunning);
     num(L"notifyTimeout", s.notifyTimeout);

@@ -349,6 +349,19 @@ void ToggleControl(RECT)
     g_app.notes->PanelsChanged();
 }
 
+// The bar's VPN entry: the control centre, straight on its VPN page.
+void ToggleVpn(RECT)
+{
+    if (g_app.control->Visible()) {
+        g_app.control->Close();
+        return;
+    }
+    if (GetTickCount64() - g_app.control->LastClosed() < 400 && g_app.control->LastClosed() > g_app.switchedBarAt)
+        return;
+    g_app.control->OpenVpn(ActiveBar().EntryRect(L"#vpn"), ActiveBar().BarRect());
+    g_app.notes->PanelsChanged();
+}
+
 void ToggleCalendar()
 {
     if (g_app.calendar->Visible()) {
@@ -1116,6 +1129,7 @@ void ConfigureBar(Bar& bar)
     bar.onTrayClick = ToggleTray;
     bar.onDesktopClick = [] { SendWinShortcut('D'); }; // the system's Show Desktop: a second click brings the windows back
     bar.onStatusClick = ToggleControl;
+    bar.onVpnClick = ToggleVpn;
     bar.onImeClick = [] {
         if (g_app.imeWatcher)
             g_app.imeWatcher->Toggle();

@@ -97,6 +97,7 @@ public:
     // Bar entries; `anchor` is the entry's rectangle on screen (popups open above it).
     std::function<void(RECT anchor)> onStartClick;  // the Atrium logo
     std::function<void(RECT anchor)> onNotifyClick; // the notification bell
+    std::function<void(RECT anchor)> onVpnClick;    // the VPN entry next to the bell
     std::function<void(RECT anchor)> onTrayClick;   // the tray entry (Atrium's tray panel)
     std::function<void()> onDesktopClick;           // the Show Desktop slot at the bar's right end
     std::function<void(RECT anchor)> onStatusClick; // the status icon (Wi-Fi, battery: the control centre)

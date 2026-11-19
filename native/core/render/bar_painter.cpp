@@ -405,7 +405,7 @@ void BarPainter::DrawContent(ID2D1DeviceContext2* d2d, const BarScene& scene, In
 
     usedBitmaps_.clear();
     for (const auto& it : scene.extras) { // the right group follows the clock's ink, the others the apps'
-        bool right = it.key == L"#notify" || it.key == L"#tray" || it.key == L"#status";
+        bool right = it.key == L"#notify" || it.key == L"#tray" || it.key == L"#status" || it.key == L"#vpn";
         DrawItem(d2d, scene, it, brush.get(), right ? inkFor(darkText) : ink, right ? washFor(darkText) : wash);
     }
     for (const auto& [key, m] : motion_)
@@ -606,6 +606,15 @@ void BarPainter::DrawItem(ID2D1DeviceContext2* d2d, const BarScene& scene, const
             brush->SetColor(D2D1::ColorF(1, 1, 1, 1));
             DrawUiText(d2d, dwrite_.get(), n, f, D2D1::RectF(bxr - d, by - d / 2, bxr + d, by + d / 2), brush);
         }
+    }
+    // On (a VPN connected): a small green dot on the icon's lower right, ringed in the halo so it reads on any glass.
+    if (it.lit) {
+        float d = std::max(6.f * s, size * 0.3f);
+        float lx = iconArea.right - d * 0.3f, ly = iconArea.bottom - d * 0.3f;
+        brush->SetColor(ink.r < 0.5f ? D2D1::ColorF(1, 1, 1, 0.9f * m.appear) : D2D1::ColorF(0, 0, 0, 0.35f * m.appear));
+        d2d->FillEllipse(D2D1::Ellipse(D2D1::Point2F(lx, ly), d / 2 + 1.2f * s, d / 2 + 1.2f * s), brush);
+        brush->SetColor(D2D1::ColorF(0.19f, 0.82f, 0.35f, m.appear));
+        d2d->FillEllipse(D2D1::Ellipse(D2D1::Point2F(lx, ly), d / 2, d / 2), brush);
     }
     d2d->SetTransform(D2D1::Matrix3x2F::Identity());
 

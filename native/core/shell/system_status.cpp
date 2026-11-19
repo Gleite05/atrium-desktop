@@ -1,6 +1,7 @@
 #include "shell/system_status.h"
 
 #include "log.h"
+#include "shell/vpn.h"
 #include "shell/wifi.h"
 #include "../posted.h"
 
@@ -175,6 +176,8 @@ SystemStatus QuerySystemStatus()
             if (!w.ssid.empty() && (s.network.empty() || !s.online))
                 s.network = w.ssid;
         }
+        for (const std::wstring& v : ConnectedVpn())
+            s.vpn += (s.vpn.empty() ? L"" : L", ") + v;
         // Read interactive volume last: a slower network query must not
         // deliver a volume value captured before the user's latest input.
         if (auto v = DefaultVolume(&s.audioDevice)) {

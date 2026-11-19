@@ -57,6 +57,7 @@ struct Settings {
     bool showStatus = true;
     bool showNotifications = true;
     bool showDesktop = false;        // the Show Desktop slot at the bar's right end
+    bool showVpn = true;             // the VPN entry next to the bell (Windows' own VPN connections)
     bool showRunning = true;
     // The interface language of the bar, its popups, the widgets and the settings app.
     // auto follows Windows' UI language (Chinese -> zh, anything else -> en).

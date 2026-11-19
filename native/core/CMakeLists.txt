@@ -46,6 +46,7 @@ add_library(atrium_core_lib STATIC
     shell/system_chrome.cpp
     shell/system_status.cpp
     shell/wifi.cpp
+    shell/vpn.cpp
     shell/radios.cpp
     shell/lunar.cpp
     shell/audio_devices.cpp
@@ -97,7 +98,7 @@ endif()
 target_link_libraries(atrium_core_lib PUBLIC
     windowsapp d3d11 dxgi dxguid dcomp d2d1 dwrite shcore user32 gdi32 shell32 ole32
     dwmapi version propsys shlwapi oleaut32 uuid imm32 powrprof wlanapi windowscodecs winhttp setupapi taskschd
-    iphlpapi advapi32 comctl32 icu wbemuuid secur32)
+    iphlpapi advapi32 comctl32 icu wbemuuid secur32 rasapi32)
 
 add_executable(atrium_core WIN32 main.cpp core.rc core.manifest)
 # build/win-x64/<Config>/Atrium.exe

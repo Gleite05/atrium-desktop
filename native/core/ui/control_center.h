@@ -14,6 +14,7 @@
 #include "shell/projection.h"
 #include "shell/radios.h"
 #include "shell/system_status.h"
+#include "shell/vpn.h"
 #include "shell/wifi.h"
 #include "ui/surface.h"
 
@@ -31,6 +32,8 @@ public:
 
     // anchor: the status ring on screen; bar: the bar's glass shape.
     void Open(RECT anchor, RECT bar);
+    // Opened from the bar's VPN entry: straight on the VPN page.
+    void OpenVpn(RECT anchor, RECT bar);
     void Close();
     bool Visible() const { return surface_.Visible(); }
     ULONGLONG LastClosed() const { return lastClosed_; }
@@ -50,7 +53,7 @@ public:
     std::function<void(bool)> onStage; // Stage Manager's switch was pressed: on or off
 
 private:
-    enum class Page { Main, Wifi, Bluetooth, Sound, Cast };
+    enum class Page { Main, Wifi, Bluetooth, Sound, Cast, Vpn };
     struct Hit {
         D2D1_RECT_F rect;
         std::wstring id;
@@ -61,6 +64,9 @@ private:
     void PaintBluetooth(Canvas& c, const Theme& t, D2D1_RECT_F card);
     void PaintSound(Canvas& c, const Theme& t, D2D1_RECT_F card);
     void PaintCast(Canvas& c, const Theme& t, D2D1_RECT_F card);
+    void PaintVpn(Canvas& c, const Theme& t, D2D1_RECT_F card);
+    void ReadVpn();
+    void ToggleVpn(size_t index);
     void Link(Canvas& c, const Theme& t, const std::wstring& id, const std::wstring& label, float left, float right, float y, int align);
     void PaintSlider(Canvas& c, const Theme& t, D2D1_RECT_F card, const std::wstring& id, const std::wstring& title, const std::wstring& glyph, int value,
                      bool dim, const std::wstring& right, D2D1_RECT_F& track, bool enabled = true);
@@ -149,6 +155,11 @@ private:
     std::wstring projecting_, connecting_; // display ids
     ProjectionMode mode_ = ProjectionMode::Unknown;
     int monitors_ = 1;
+    // VPN page: Windows' VPN connections; one being connected or disconnected
+    // shows that (name -> "Connecting…"), a failed attempt its reason.
+    std::vector<VpnEntry> vpns_;
+    bool vpnRead_ = false;
+    std::map<std::wstring, std::wstring> vpnBusy_, vpnError_;
 };
 
 } // namespace atrium
