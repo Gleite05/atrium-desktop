@@ -90,7 +90,7 @@ bool RegisterLogonTask(const std::wstring& exe)
                              L"<RegistrationInfo><Description>Starts Atrium when you sign in.</Description></RegistrationInfo>"
                              L"<Triggers><LogonTrigger><Enabled>true</Enabled><UserId>" +
                              sid +
-                             L"</UserId></LogonTrigger></Triggers>"
+                             L"</UserId><Delay>PT15S</Delay></LogonTrigger></Triggers>" // after Explorer's own start (see WaitForExplorerShell)
                              L"<Principals><Principal id=\"Author\"><UserId>" +
                              sid +
                              L"</UserId><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals>"

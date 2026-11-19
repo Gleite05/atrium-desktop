@@ -1632,6 +1632,38 @@ void WaitForGuard()
 
 } // namespace
 
+// Explorer's own taskbar is there (a Shell_TrayWnd of explorer.exe, not another shell's).
+static bool ExplorerTaskbarUp()
+{
+    for (HWND w = nullptr; (w = FindWindowExW(nullptr, w, L"Shell_TrayWnd", nullptr)) != nullptr;) {
+        DWORD pid = 0;
+        GetWindowThreadProcessId(w, &pid);
+        HANDLE p = pid ? OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid) : nullptr;
+        if (!p)
+            continue;
+        wchar_t path[MAX_PATH * 2] = {};
+        DWORD len = DWORD(std::size(path));
+        const bool explorer = QueryFullProcessImageNameW(p, 0, path, &len) && len >= 12 && _wcsicmp(path + len - 12, L"explorer.exe") == 0;
+        CloseHandle(p);
+        if (explorer)
+            return true;
+    }
+    return false;
+}
+
+// Signing in: Explorer first. Started before it (the logon task can win the race), the tray host's
+// Shell_TrayWnd was there first and Explorer took itself for a second shell: it skipped the startup
+// apps (HKCU\...\Run) and the wallpaper. Waits for Explorer's taskbar and its start-up, at most 2 min.
+static void WaitForExplorerShell()
+{
+    if (ExplorerTaskbarUp())
+        return;
+    const ULONGLONG until = GetTickCount64() + 120000;
+    while (!ExplorerTaskbarUp() && GetTickCount64() < until)
+        Sleep(500);
+    Sleep(8000); // its startup apps and the desktop, before our windows
+}
+
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
 {
     SetLanguage(L"auto"); // before any message; the saved choice follows with LoadSettings
@@ -1680,6 +1712,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
         WaitForGuard(); // it runs from the same file: the updater moves the folder next
         return wait == WAIT_OBJECT_0 ? 0 : 1;
     }
+    WaitForExplorerShell();
     HANDLE mutex = CreateMutexW(nullptr, TRUE, kInstanceMutex);
     if (!mutex)
         return 1;
