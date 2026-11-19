@@ -503,6 +503,14 @@ bool RunNoticeAction(const Notice& n)
         std::wstring aumid = n.action.substr(4), key = aumid;
         for (auto& c : key)
             c = wchar_t(towlower(c));
+        // A window of the app already there (open or minimized): brought to the front. Before the
+        // tray: a tray click toggles many apps (WhatsApp, Telegram), closing a window that is open.
+        for (const TaskItem& t : g_app.tasks->Snapshot())
+            if (t.key == key && !t.windows.empty()) {
+                g_app.tasks->Show(key);
+                Log(L"notify: action shows the window of %s", n.app.c_str());
+                return true;
+            }
         // An app living in the tray (QQ, WeChat, Feishu): its own tray click
         // opens what is new, the chat of the unread message. Starting it again
         // would open a second instance's login window instead.
@@ -512,15 +520,24 @@ bool RunNoticeAction(const Notice& n)
             Log(L"notify: action through the tray icon of %s", n.app.c_str());
             return true;
         }
-        for (const TaskItem& t : g_app.tasks->Snapshot())
-            if (t.key == key && !t.windows.empty()) {
-                g_app.tasks->Show(key);
-                return true;
-            }
         // A program path (WeChat): starting it again shows its running instance.
         bool exe = aumid.size() > 2 && aumid[1] == L':';
         std::wstring path = exe ? aumid : L"shell:AppsFolder\\" + aumid;
         return reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL)) > 32;
+    }
+    // No AUMID (an unpackaged sender, Telegram's): its window found by the app's name.
+    if (n.action.empty() && !n.app.empty()) {
+        for (const TaskItem& t : g_app.tasks->Snapshot())
+            if (!t.windows.empty() && CompareStringOrdinal(t.name.c_str(), -1, n.app.c_str(), -1, TRUE) == CSTR_EQUAL) {
+                g_app.tasks->Show(t.key);
+                Log(L"notify: action shows the window of %s (by name)", n.app.c_str());
+                return true;
+            }
+        if (const TrayIcon* icon = TrayIconOf(n)) {
+            AllowSetForegroundWindow(ASFW_ANY);
+            g_app.tray->Click(*icon, false);
+            return true;
+        }
     }
     return true; // nothing to run: the click just dismisses it
 }
