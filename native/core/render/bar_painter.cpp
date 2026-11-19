@@ -599,7 +599,9 @@ void BarPainter::DrawItem(ID2D1DeviceContext2* d2d, const BarScene& scene, const
     if (it.badge > 0) {
         float d = std::max(9.f * s, size * 0.46f);
         float bxr = iconArea.right - d * 0.35f, by = iconArea.top + d * 0.15f;
-        brush->SetColor(D2D1::ColorF(0.04f, 0.52f, 1.0f, 1.0f));
+        // The bell's in the accent; an app's (its unread messages) red, as the macOS Dock's.
+        const bool app = it.key.empty() || it.key[0] != L'#';
+        brush->SetColor(app ? D2D1::ColorF(1.0f, 0.23f, 0.19f, 1.0f) : D2D1::ColorF(0.04f, 0.52f, 1.0f, 1.0f));
         d2d->FillEllipse(D2D1::Ellipse(D2D1::Point2F(bxr, by), d / 2, d / 2), brush);
         std::wstring n = it.badge > 9 ? L"9+" : std::to_wstring(it.badge);
         if (IDWriteTextFormat* f = Format(d * 0.62f, DWRITE_FONT_WEIGHT_SEMI_BOLD)) {

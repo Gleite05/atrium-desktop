@@ -982,9 +982,67 @@ void Bar::SetItems(std::vector<TaskItem> items)
     if (same) {
         items_ = allItems_;
         UpdateTooltips();
+        RefreshBadges(); // a title's "(N)" may have changed
     } else {
         Relayout();
     }
+}
+
+void Bar::SetToasts(std::vector<ToastEntry> toasts)
+{
+    toasts_ = std::move(toasts);
+    RefreshBadges();
+}
+
+void Bar::RefreshBadges()
+{
+    if (ComputeBadges() != badges_)
+        Relayout();
+}
+
+namespace {
+
+// "Geni Mendez – (4)": the count a window keeps at the end of its title (Telegram's unread
+// chats). Only at the end: browsers end with their own name, so a page's "(3) …" is not taken.
+int TitleCount(HWND h)
+{
+    wchar_t buf[256] = {};
+    const int len = GetWindowTextW(h, buf, 256);
+    if (len < 3 || buf[len - 1] != L')')
+        return 0;
+    int i = len - 2, n = 0, mul = 1;
+    while (i >= 0 && buf[i] >= L'0' && buf[i] <= L'9' && mul <= 1000) {
+        n += (buf[i] - L'0') * mul;
+        mul *= 10;
+        --i;
+    }
+    return i >= 0 && buf[i] == L'(' && mul > 1 ? n : 0;
+}
+
+bool SameText(const std::wstring& a, const std::wstring& b) { return !a.empty() && CompareStringOrdinal(a.c_str(), -1, b.c_str(), -1, TRUE) == CSTR_EQUAL; }
+
+} // namespace
+
+std::map<std::wstring, int> Bar::ComputeBadges()
+{
+    std::map<std::wstring, int> out;
+    const ULONGLONG now = GetTickCount64();
+    for (const TaskItem& t : items_) {
+        if (t.active)
+            seenAt_[t.key] = now; // in front: what arrived so far counts as seen
+        int n = 0;
+        for (HWND h : t.windows)
+            n = std::max(n, TitleCount(h));
+        const auto seen = seenAt_.find(t.key);
+        const ULONGLONG since = seen == seenAt_.end() ? 0 : seen->second;
+        const int toasts = int(std::ranges::count_if(toasts_, [&](const ToastEntry& e) {
+            return e.created > since && (SameText(e.appId, t.key) || (e.appId.empty() && SameText(e.app, t.name)));
+        }));
+        n = std::max(n, toasts);
+        if (n > 0)
+            out[t.key] = n;
+    }
+    return out;
 }
 
 void Bar::SetVisible(bool visible)
@@ -1078,6 +1136,7 @@ void Bar::Relayout()
     const int rightCount = int(showTray) + int(showIme) + int(showStatus) + int(showVpn) + int(showNotifications) + int(clockW != 0) + int(showDesktop);
     const int groupGap = rightCount ? sepGap : 0;
     const int total = int(items_.size());
+    badges_ = ComputeBadges();
     int n = total;
     bool more = false;
     auto padFor = [&](int p) { return (barH - p) / 2 + Px(4, s); }; // ends: plate gap plus a little air
@@ -1260,6 +1319,8 @@ void Bar::Relayout()
         it.running = !t.windows.empty();
         it.active = t.active;
         it.attention = t.attention;
+        if (auto b = badges_.find(t.key); b != badges_.end())
+            it.badge = b->second;
         if (auto b = bounces_.find(t.key); b != bounces_.end()) {
             it.bounceMs = b->second;
         }

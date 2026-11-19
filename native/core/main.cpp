@@ -629,7 +629,7 @@ void ApplySettings(const Settings& s)
     // Also for the chat apps' own Windows notifications (QQ's), each by its own switch.
     const bool toasts = s.notifyListener || s.notifyQQ || s.notifyWeChat || s.notifyFeishu || s.notifyWeCom || s.notifyDingTalk;
     if (s.bar && toasts && !g_app.listener)
-        g_app.listener = std::make_unique<NotificationListener>(g_app.host, WM_NOTICE);
+        g_app.listener = std::make_unique<NotificationListener>(g_app.host, WM_NOTICE, WM_TOASTS);
     else if (!(s.bar && toasts) && g_app.listener)
         g_app.listener.reset();
     if (s.bar && s.notifyWeChat && !g_app.wechat)
@@ -1344,6 +1344,11 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
             g_app.start->Refresh();
         return 0;
     case WM_VOLUME: UpdateStatus(); return 0;
+    case WM_TOASTS: {
+        auto toasts = TakePosted<std::vector<ToastEntry>>(l);
+        ForBars([&](Bar& bar) { bar.SetToasts(*toasts); });
+        return 0;
+    }
     case WM_STATUS: {
         auto status = TakePosted<SystemStatus>(l);
         status->brightness = g_app.brightness;
@@ -1474,6 +1479,7 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
                 EnsureGuard();
             }
             UpdateStatus();
+            ForBars([](Bar& bar) { bar.RefreshBadges(); }); // titles' "(N)", seen toasts
             if (g_app.chrome)
                 g_app.chrome->Enforce();
             return 0;

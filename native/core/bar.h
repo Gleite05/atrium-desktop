@@ -22,6 +22,7 @@
 #include "settings.h"
 #include "shell/task_model.h"
 #include "shell/displays.h"
+#include "shell/notification_listener.h"
 
 #include <windows.h>
 #include <dwrite_3.h>
@@ -66,6 +67,11 @@ public:
     bool Visible() const { return visible_; }
     // Unread notifications, shown as a badge on the bell.
     void SetUnread(int count);
+    // The toasts in Windows' notification centre: each app's count of those that arrived since it
+    // was last in front shows as a badge on its icon (with a "(N)" at the end of its window's
+    // title, as Telegram's, whichever is more).
+    void SetToasts(std::vector<ToastEntry> toasts);
+    void RefreshBadges(); // titles change without a relayout: called now and then
     // Network, battery and volume for the status icon.
     void SetStatus(const SystemStatus& status);
     // The foreground window's input (中/a/A) in the input method entry; empty: not known.
@@ -203,6 +209,10 @@ private:
     Settings settings_;
     std::vector<TaskItem> items_;
     std::vector<TaskItem> allItems_; // unfiltered task model, shared by every display
+    std::vector<ToastEntry> toasts_;
+    std::map<std::wstring, int> badges_;         // app key -> count on its icon
+    std::map<std::wstring, ULONGLONG> seenAt_;   // app key -> when it was last in front
+    std::map<std::wstring, int> ComputeBadges();
     bool filterTasks_ = false;
     bool layoutPending_ = false; // coalesce window-move events
     bool coverPending_ = false; // a look at what covers the monitor is due (kCoverTimer)

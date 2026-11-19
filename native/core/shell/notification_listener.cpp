@@ -10,8 +10,11 @@
 #include <winrt/Windows.UI.Notifications.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cwctype>
 #include <map>
+#include <memory>
+#include <vector>
 
 namespace atrium {
 
@@ -84,11 +87,44 @@ Notice ToNotice(const wun::UserNotification& un)
     return n;
 }
 
-void PollOnce(const wunm::UserNotificationListener& listener, HWND notify, UINT msg, std::map<uint32_t, size_t>& seen, bool first, int& posted)
+void PollOnce(const wunm::UserNotificationListener& listener, HWND notify, UINT msg, std::map<uint32_t, size_t>& seen, bool first, int& posted,
+              UINT toastsMsg, std::map<uint32_t, ToastEntry>& entries)
 {
     auto list = listener.GetNotificationsAsync(wun::NotificationKinds::Toast).get();
     std::map<uint32_t, size_t> now;
     const auto clock = winrt::clock::now();
+    // Who sent each toast and when, for the counts on the bar's icons: read once per toast.
+    if (toastsMsg) {
+        std::map<uint32_t, ToastEntry> current;
+        bool changed = false;
+        for (const auto& un : list) {
+            if (auto old = entries.find(un.Id()); old != entries.end()) {
+                current[un.Id()] = old->second;
+                continue;
+            }
+            ToastEntry e;
+            try {
+                auto info = un.AppInfo();
+                e.appId = std::wstring(info.AppUserModelId());
+                e.app = std::wstring(info.DisplayInfo().DisplayName());
+            } catch (const winrt::hresult_error&) {
+                e.appId.clear(); // unpackaged senders have no AppInfo
+            }
+            const auto age = std::chrono::duration_cast<std::chrono::milliseconds>(clock - un.CreationTime()).count();
+            const ULONGLONG tick = GetTickCount64();
+            e.created = age > 0 && ULONGLONG(age) < tick ? tick - ULONGLONG(age) : tick;
+            current[un.Id()] = std::move(e);
+            changed = true;
+        }
+        changed = changed || current.size() != entries.size();
+        entries = std::move(current);
+        if (changed) {
+            auto snapshot = std::make_unique<std::vector<ToastEntry>>();
+            for (const auto& [id, e] : entries)
+                snapshot->push_back(e);
+            PostOwned(notify, toastsMsg, 0, std::move(snapshot));
+        }
+    }
     for (const auto& un : list) {
         // Reading a toast's text parses its XML: every second for every toast in the
         // notification centre, that was most of Atrium's idle CPU. A toast is read when
@@ -118,7 +154,8 @@ void PollOnce(const wunm::UserNotificationListener& listener, HWND notify, UINT 
 
 } // namespace
 
-NotificationListener::NotificationListener(HWND notify, UINT msg) : notify_(notify), msg_(msg), wake_(CreateEventW(nullptr, TRUE, FALSE, nullptr))
+NotificationListener::NotificationListener(HWND notify, UINT msg, UINT toastsMsg)
+    : notify_(notify), msg_(msg), toastsMsg_(toastsMsg), wake_(CreateEventW(nullptr, TRUE, FALSE, nullptr))
 {
     thread_ = std::thread([this] { Run(); });
 }
@@ -147,6 +184,7 @@ void NotificationListener::Run()
         // later a toast is posted when it appears and again when its text
         // changes (senders update a toast in place).
         std::map<uint32_t, size_t> seen; // id -> hash of its text
+        std::map<uint32_t, ToastEntry> entries; // id -> its sender and arrival
         bool first = true;
         int posted = 0;
         if (access == wunm::UserNotificationListenerAccessStatus::Allowed)
@@ -160,7 +198,7 @@ void NotificationListener::Run()
                     access = nowAccess;
                 }
                 if (access == wunm::UserNotificationListenerAccessStatus::Allowed) {
-                    PollOnce(listener, notify_, msg_, seen, first, posted);
+                    PollOnce(listener, notify_, msg_, seen, first, posted, toastsMsg_, entries);
                     first = false;
                 } else {
                     seen.clear();

@@ -16,13 +16,22 @@
 #include <atomic>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace atrium {
+
+// A toast in Windows' notification centre now: who sent it and when (for the bar's counts).
+struct ToastEntry {
+    std::wstring appId; // the sender's AUMID (empty: unpackaged, unknown)
+    std::wstring app;   // its display name
+    ULONGLONG created = 0; // GetTickCount64() when it arrived
+};
 
 class NotificationListener {
 public:
     // Posts `msg` to `notify` with a heap-allocated Notice* in lParam (the receiver deletes it).
-    NotificationListener(HWND notify, UINT msg);
+    // With `toastsMsg`, also posts a std::vector<ToastEntry>* (every toast there) when the set changes.
+    NotificationListener(HWND notify, UINT msg, UINT toastsMsg = 0);
     ~NotificationListener();
     NotificationListener(const NotificationListener&) = delete;
     NotificationListener& operator=(const NotificationListener&) = delete;
@@ -31,6 +40,7 @@ private:
     void Run();
     HWND notify_;
     UINT msg_;
+    UINT toastsMsg_ = 0;
     std::atomic<bool> stop_{false};
     HANDLE wake_ = nullptr;
     std::thread thread_;
