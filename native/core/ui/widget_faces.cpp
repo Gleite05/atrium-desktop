@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cwchar>
 #include <map>
 #include <numbers>
 
@@ -725,6 +726,119 @@ void PaintReminders(Canvas& c, const WidgetContent& r, const Pal& p, float fw, f
     }
 }
 
+// ---- now playing ---------------------------------------------------------------
+
+// "3:07"; hours as "1:02:07".
+std::wstring TrackTime(double seconds)
+{
+    const int t = int(std::max(0.0, seconds));
+    wchar_t b[24] = {};
+    if (t >= 3600)
+        swprintf_s(b, L"%d:%02d:%02d", t / 3600, t / 60 % 60, t % 60);
+    else
+        swprintf_s(b, L"%d:%02d", t / 60, t % 60);
+    return b;
+}
+
+// What is playing, after macOS's Music widget: the album art, the track and the artist, how far
+// it is, and the player's three buttons. Spotify's session first (now_playing).
+void PaintMedia(Canvas& c, WidgetSize size, const WidgetWorld& w, const Pal& p, float fw, float fh, std::vector<WidgetHit>& hits)
+{
+    const NowPlaying& m = w.media;
+    const D2D1_COLOR_F spotify = Rgba(0x1DB954, 1);
+    const bool has = m.present && !m.title.empty();
+    auto art = [&](D2D1_RECT_F r, float radius) {
+        if (has && m.art && !m.art->Empty()) {
+            c.Fill(D2D1::RectF(r.left, r.top + 2, r.right, r.bottom + 3), radius, Rgba(0x000000, 0.18f)); // a soft shadow under the cover
+            c.ImageRounded(L"art:" + std::to_wstring(m.artId), *m.art, r, radius);
+        } else {
+            c.Fill(r, radius, p.face);
+            const float s = std::min(r.right - r.left, r.bottom - r.top);
+            c.Glyph(L"", r, s * 0.34f, p.sub);
+        }
+    };
+    // The source: Spotify's green dot and its name (or the app's).
+    auto source = [&](D2D1_RECT_F r) {
+        const float cy = (r.top + r.bottom) / 2;
+        const bool sp = m.IsSpotify() || !m.present;
+        c.Circle(r.left + 4, cy, 4, sp ? spotify : p.sub);
+        std::wstring name = sp ? std::wstring(L"Spotify") : m.app.substr(m.app.find_last_of(L"\\!") == std::wstring::npos ? 0 : m.app.find_last_of(L"\\!") + 1);
+        if (name.size() > 4 && _wcsicmp(name.c_str() + name.size() - 4, L".exe") == 0)
+            name.resize(name.size() - 4);
+        c.Text(m.playing ? name : name + L" · " + Tr(L"Paused"), D2D1::RectF(r.left + 13, r.top, r.right, r.bottom), 11.5f, p.sub, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    };
+    auto progress = [&](float left, float right, float y, bool times) {
+        const D2D1_RECT_F track = D2D1::RectF(left, y, right, y + 4);
+        c.Fill(track, 2, p.track);
+        if (has && m.duration > 0) {
+            const float k = float(std::clamp(m.PositionNow() / m.duration, 0.0, 1.0));
+            c.Fill(D2D1::RectF(left, y, left + std::max(4.f, (right - left) * k), y + 4), 2, p.text);
+        }
+        if (times && has && m.duration > 0) {
+            c.Text(TrackTime(m.PositionNow()), D2D1::RectF(left, y + 7, left + 80, y + 21), 10.5f, p.sub);
+            c.Text(L"-" + TrackTime(m.duration - m.PositionNow()), D2D1::RectF(right - 80, y + 7, right, y + 21), 10.5f, p.sub, DWRITE_FONT_WEIGHT_NORMAL, 2);
+        }
+    };
+    // Previous, play or pause, next: centred on cx.
+    auto buttons = [&](float cx, float cy, float big) {
+        const float minor = big * 0.72f, gap = big * 0.62f;
+        const D2D1_RECT_F play = D2D1::RectF(cx - big / 2, cy - big / 2, cx + big / 2, cy + big / 2);
+        const D2D1_RECT_F prev = D2D1::RectF(play.left - gap - minor, cy - minor / 2, play.left - gap, cy + minor / 2);
+        const D2D1_RECT_F next = D2D1::RectF(play.right + gap, cy - minor / 2, play.right + gap + minor, cy + minor / 2);
+        const D2D1_COLOR_F ink = has ? p.text : p.faint;
+        c.Glyph(L"", prev, minor * 0.5f, ink);
+        c.Circle(cx, cy, big / 2, has ? p.text : p.face);
+        bool halo = c.halo;
+        c.halo = false;
+        c.Glyph(m.playing ? L"" : L"", play, big * 0.4f, has ? p.onAccent : p.sub);
+        c.halo = halo;
+        c.Glyph(L"", next, minor * 0.5f, ink);
+        auto grow = [](D2D1_RECT_F r, float d) { return D2D1::RectF(r.left - d, r.top - d, r.right + d, r.bottom + d); };
+        hits.push_back({grow(prev, 6), L"media:prev"});
+        hits.push_back({grow(play, 4), L"media:play"});
+        hits.push_back({grow(next, 6), L"media:next"});
+    };
+    const std::wstring title = has ? m.title : (w.mediaRead ? Tr(L"Nothing playing") : L"…");
+    const std::wstring artist = has ? (m.artist.empty() ? m.album : m.artist) : Tr(L"Open Spotify to play music");
+
+    if (size == WidgetSize::Small) {
+        art(D2D1::RectF(kPad, kPad, kPad + 74, kPad + 74), 12);
+        // Play or pause, at the top right.
+        const float bx = fw - kPad - 17, by = kPad + 17;
+        c.Circle(bx, by, 17, has ? p.text : p.face);
+        bool halo = c.halo;
+        c.halo = false;
+        c.Glyph(m.playing ? L"" : L"", D2D1::RectF(bx - 17, by - 17, bx + 17, by + 17), 13, has ? p.onAccent : p.sub);
+        c.halo = halo;
+        hits.push_back({D2D1::RectF(bx - 22, by - 22, bx + 22, by + 22), L"media:play"});
+        if (has && m.IsSpotify())
+            c.Circle(fw - kPad - 4, kPad + 74 - 4, 4, spotify);
+        c.Text(title, D2D1::RectF(kPad, fh - kPad - 50, fw - kPad, fh - kPad - 30), 13.5f, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+        c.Text(artist, D2D1::RectF(kPad, fh - kPad - 30, fw - kPad, fh - kPad - 13), 12, p.sub);
+        progress(kPad, fw - kPad, fh - kPad - 4, false);
+        return;
+    }
+    if (size == WidgetSize::Medium) {
+        const float side = fh - 2 * kPad;
+        art(D2D1::RectF(kPad, kPad, kPad + side, kPad + side), 14);
+        const float l = kPad + side + 16, r = fw - kPad;
+        source(D2D1::RectF(l, kPad, r, kPad + 16));
+        c.Text(title, D2D1::RectF(l, kPad + 22, r, kPad + 44), 15, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+        c.Text(artist, D2D1::RectF(l, kPad + 44, r, kPad + 62), 12.5f, p.sub);
+        progress(l, r, kPad + 74, true);
+        buttons((l + r) / 2, fh - kPad - 18, 34);
+        return;
+    }
+    // Large: the cover on top, the track under it, the controls at the bottom.
+    const float side = 182;
+    art(D2D1::RectF((fw - side) / 2, kPad + 4, (fw + side) / 2, kPad + 4 + side), 16);
+    float y = kPad + 4 + side + 12;
+    c.Text(title, D2D1::RectF(kPad, y, fw - kPad, y + 22), 16, p.text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1);
+    c.Text(artist, D2D1::RectF(kPad, y + 22, fw - kPad, y + 40), 12.5f, p.sub, DWRITE_FONT_WEIGHT_NORMAL, 1);
+    progress(kPad + 6, fw - kPad - 6, y + 50, true);
+    buttons(fw / 2, fh - kPad - 22, 40);
+}
+
 // A photo filling the card; without one, how to choose a folder.
 void PaintPhotos(Canvas& c, const WidgetContent& ph, const Pal& p, float fw, float fh)
 {
@@ -1035,6 +1149,7 @@ void PaintWidget(Canvas& c, WidgetKind kind, WidgetSize size, WidgetMaterial mat
     case WidgetKind::Weather: PaintWeather(c, size, world, p, fw, fh); break;
     case WidgetKind::Bluetooth: PaintBluetooth(c, size, world, p, fw, fh); break;
     case WidgetKind::Network: PaintNetwork(c, size, world, p, fw, fh); break;
+    case WidgetKind::Media: PaintMedia(c, size, world, p, fw, fh, hits); break;
     }
 }
 

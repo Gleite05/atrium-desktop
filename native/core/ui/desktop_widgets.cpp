@@ -43,6 +43,7 @@ constexpr UINT WM_WIDGET_RESTACK = WM_APP + 2;   // a burst of window events, on
 constexpr UINT WM_WIDGET_PHOTO = WM_APP + 3;     // lParam PhotoRead*: a photo was read
 constexpr UINT WM_WIDGET_WEATHER = WM_APP + 4;   // a new forecast (WeatherSource::Latest)
 constexpr UINT WM_WIDGET_BLUETOOTH = WM_APP + 5; // the Bluetooth batteries changed (BluetoothBatteries::Latest)
+constexpr UINT WM_WIDGET_MEDIA = WM_APP + 6;     // what is playing changed (MediaSource::Latest)
 
 DesktopWidgets* g_widgets = nullptr; // the WinEvent hook's way back
 
@@ -53,7 +54,7 @@ struct KindName {
 const KindName kKinds[] = {{WidgetKind::Clock, L"clock"},         {WidgetKind::Calendar, L"calendar"}, {WidgetKind::Battery, L"battery"},
                            {WidgetKind::Digital, L"digital"},     {WidgetKind::System, L"system"},     {WidgetKind::Notes, L"notes"},
                            {WidgetKind::Reminders, L"reminders"}, {WidgetKind::Photos, L"photos"},     {WidgetKind::Weather, L"weather"},
-                           {WidgetKind::Bluetooth, L"bluetooth"}, {WidgetKind::Network, L"network"}};
+                           {WidgetKind::Bluetooth, L"bluetooth"}, {WidgetKind::Network, L"network"},   {WidgetKind::Media, L"media"}};
 
 const wchar_t* NameOf(WidgetKind k)
 {
@@ -260,7 +261,8 @@ DesktopWidgets::DesktopWidgets(HINSTANCE instance)
       }()),
       weather_(std::make_unique<WeatherSource>(host_, WM_WIDGET_WEATHER)),
       bluetooth_(std::make_unique<BluetoothBatteries>(host_, WM_WIDGET_BLUETOOTH)),
-      network_(std::make_unique<NetworkMonitor>())
+      network_(std::make_unique<NetworkMonitor>()),
+      media_(std::make_unique<MediaSource>(host_, WM_WIDGET_MEDIA))
 {
     g_widgets = this;
     SetWindowLongPtrW(host_, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
@@ -931,6 +933,19 @@ LRESULT CALLBACK DesktopWidgets::HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
                 if (wd->kind == WidgetKind::Bluetooth && wd->surface)
                     wd->surface->Invalidate();
             return 0;
+        case WM_WIDGET_MEDIA: {
+            NowPlaying now = self->media_->Latest();
+            const unsigned oldArt = self->world_.media.artId;
+            for (auto& wd : self->widgets_)
+                if (wd->kind == WidgetKind::Media && wd->surface) {
+                    if (oldArt && oldArt != now.artId)
+                        wd->surface->ForgetImage(L"art:" + std::to_wstring(oldArt));
+                    wd->surface->Invalidate();
+                }
+            self->world_.media = std::move(now);
+            self->world_.mediaRead = true;
+            return 0;
+        }
         case WM_TIMECHANGE:
             self->world_.city = LocalCity();
             self->Tick();
@@ -962,10 +977,14 @@ void DesktopWidgets::Tick()
     network_->SetActive(watching);
     if (watching)
         network_->Sample();
+    // What is playing, once a second while a media widget is up; its progress moves on while it plays.
+    media_->SetActive(std::ranges::any_of(widgets_, [](const auto& w) { return w->kind == WidgetKind::Media; }));
+    const bool playing = world_.media.playing;
     for (auto& w : widgets_) {
         if (!w->surface)
             continue;
-        if (w->kind == WidgetKind::Clock || minute || (sample && w->kind == WidgetKind::System) || (watching && w->kind == WidgetKind::Network))
+        if (w->kind == WidgetKind::Clock || minute || (sample && w->kind == WidgetKind::System) || (watching && w->kind == WidgetKind::Network) ||
+            (playing && w->kind == WidgetKind::Media))
             w->surface->Invalidate();
         if (w->kind == WidgetKind::Photos && w->photoAt && now - w->photoAt > kPhotoMs)
             LoadPhoto(*w, true);
@@ -1185,7 +1204,7 @@ bool DesktopWidgets::Message(Widget& w, UINT m, WPARAM wp, LPARAM lp, LRESULT& r
             Restack();
             Log(L"widgets: %s moved to %d,%d", NameOf(w.kind), w.col, w.row);
         } else if (m == WM_LBUTTONUP) {
-            if (Editable(w.kind))
+            if (Editable(w.kind) || w.kind == WidgetKind::Media)
                 Click(w, POINT{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)});
             else
                 Activate(w);
@@ -1226,6 +1245,9 @@ void DesktopWidgets::Activate(Widget& w)
     case WidgetKind::Network:
         open = L"ms-settings:network-status"; // 网络和 Internet: the adapters, their speeds and their usage
         break;
+    case WidgetKind::Media:
+        open = L"spotify:"; // Spotify (desktop or Store) registers its own scheme
+        break;
     case WidgetKind::Photos:
         if (w.content.photo.empty())
             PickFolder(w);
@@ -1258,6 +1280,23 @@ void DesktopWidgets::Click(Widget& w, POINT content)
             id = h.id;
             break;
         }
+    if (w.kind == WidgetKind::Media) {
+        // The player's buttons; anywhere else opens the player.
+        if (id.starts_with(L"media:")) {
+            w.surface->Ripple(p.x, p.y);
+            media_->Do(id == L"media:prev" ? MediaAction::Previous : id == L"media:next" ? MediaAction::Next : MediaAction::PlayPause);
+            if (id == L"media:play") {
+                world_.media.playing = !world_.media.playing; // at once; the next reading confirms it
+                world_.media.position = world_.media.PositionNow();
+                world_.media.at = GetTickCount64();
+                w.surface->Invalidate();
+            }
+            Log(L"widgets: media %s", id.c_str() + 6);
+        } else {
+            Activate(w);
+        }
+        return;
+    }
     WidgetContent& c = w.content;
     if (id.starts_with(L"toggle:")) {
         size_t i = size_t(_wtoi(id.c_str() + 7));

@@ -7,6 +7,7 @@
 #include "shell/bluetooth_batteries.h"
 #include "shell/lunar.h"
 #include "shell/network_monitor.h"
+#include "shell/now_playing.h"
 #include "shell/system_status.h"
 #include "shell/weather.h"
 #include "ui/surface.h"
@@ -17,7 +18,7 @@
 
 namespace atrium {
 
-enum class WidgetKind { Clock, Calendar, Battery, Digital, System, Notes, Reminders, Photos, Weather, Bluetooth, Network };
+enum class WidgetKind { Clock, Calendar, Battery, Digital, System, Notes, Reminders, Photos, Weather, Bluetooth, Network, Media };
 enum class WidgetSize { Small, Medium, Large };
 // Glass: the bar's clear glass, its ink adapting to what shows through. Dusk: the same glass
 // dimmed by a dark veil, everything on it white (macOS's dimmed desktop widgets). Color: each
@@ -77,11 +78,13 @@ struct WidgetWorld {
     std::vector<BluetoothBattery> bluetooth; // the connected devices' batteries
     bool bluetoothRead = false;              // false until the first reading
     const NetworkMonitor* network = nullptr; // the link's rates and their minute of history
+    NowPlaying media;                        // what is playing (Spotify first)
+    bool mediaRead = false;                  // false until the first reading
 };
 
 // Places in a widget that respond to the pointer (content DIP): "toggle:<i>"
 // and "item:<i>" (a reminder's circle and text), "add" (a new reminder),
-// "text" (the note). "caret" is where the caret is (the input method's window).
+// "text" (the note), "media:prev", "media:play", "media:next" (the player's buttons). "caret" is where the caret is (the input method's window).
 struct WidgetHit {
     D2D1_RECT_F rect;
     std::wstring id;

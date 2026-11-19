@@ -121,6 +121,8 @@ public:
     // An icon by a stable cache key; `image` is only read the first time.
     void Image(const std::wstring& key, const IconImage& image, D2D1_RECT_F r, float opacity = 1);
     void ImageCircle(const std::wstring& key, const IconImage& image, D2D1_RECT_F r);
+    // An image as Image draws it, its corners rounded by `radius` (DIP).
+    void ImageRounded(const std::wstring& key, const IconImage& image, D2D1_RECT_F r, float radius, float opacity = 1);
     // An image as Image draws it into `r`, then through `perspective`: a 4x4 transform in px of the
     // content (what Px gives), before the group's transform.
     void ImagePerspective(const std::wstring& key, const IconImage& image, D2D1_RECT_F r, const D2D1_MATRIX_4X4_F& perspective, float opacity = 1);

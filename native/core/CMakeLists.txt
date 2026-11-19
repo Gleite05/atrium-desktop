@@ -47,6 +47,7 @@ add_library(atrium_core_lib STATIC
     shell/system_status.cpp
     shell/wifi.cpp
     shell/vpn.cpp
+    shell/now_playing.cpp
     shell/radios.cpp
     shell/lunar.cpp
     shell/audio_devices.cpp

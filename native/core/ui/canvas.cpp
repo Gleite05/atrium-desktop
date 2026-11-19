@@ -349,6 +349,19 @@ void Canvas::ImageCircle(const std::wstring& key, const IconImage& image, D2D1_R
     d2d_->PopLayer();
 }
 
+void Canvas::ImageRounded(const std::wstring& key, const IconImage& image, D2D1_RECT_F r, float radius, float opacity)
+{
+    winrt::com_ptr<ID2D1Factory> f;
+    d2d_->GetFactory(f.put());
+    winrt::com_ptr<ID2D1RoundedRectangleGeometry> g;
+    const D2D1_RECT_F p = Px(r);
+    if (FAILED(f->CreateRoundedRectangleGeometry(D2D1::RoundedRect(p, radius * scale, radius * scale), g.put())))
+        return;
+    d2d_->PushLayer(D2D1::LayerParameters(D2D1::InfiniteRect(), g.get(), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE), nullptr);
+    Image(key, image, r, opacity);
+    d2d_->PopLayer();
+}
+
 void Canvas::Ripple(D2D1_RECT_F r, float radius, float x, float y, float t, D2D1_COLOR_F c)
 {
     t = std::clamp(t, 0.f, 1.f);

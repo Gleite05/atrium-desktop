@@ -111,6 +111,7 @@ private:
     std::unique_ptr<WeatherSource> weather_;
     std::unique_ptr<BluetoothBatteries> bluetooth_;
     std::unique_ptr<NetworkMonitor> network_;
+    std::unique_ptr<MediaSource> media_;
     ChineseCalendar lunar_;
     int lastMinute_ = -1;
     uint64_t cpuIdle_ = 0, cpuTotal_ = 0; // the last GetSystemTimes
