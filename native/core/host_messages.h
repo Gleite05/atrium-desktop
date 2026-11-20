@@ -22,5 +22,6 @@ constexpr UINT WM_WIN_KEY = WM_APP + 12;      // Windows key alone (0, winKeySta
 constexpr UINT WM_USB = WM_APP + 13;          // the device worker has queued removal notices
 constexpr UINT WM_IME_STATE = WM_APP + 20;    // the input method may have changed (ImeWatcher)
 constexpr UINT WM_TOASTS = WM_APP + 21;       // lParam: std::vector<ToastEntry>*, the notification centre's toasts
+constexpr UINT WM_BAR_MEDIA = WM_APP + 22;    // what is playing changed (the bar's MediaSource)
 
 } // namespace atrium

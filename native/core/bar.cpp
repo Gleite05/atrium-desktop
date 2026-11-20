@@ -55,6 +55,8 @@ constexpr wchar_t kStatusKey[] = L"#status";
 constexpr wchar_t kMoreKey[] = L"#more";
 constexpr wchar_t kDesktopKey[] = L"#desktop";
 constexpr wchar_t kVpnKey[] = L"#vpn";
+constexpr wchar_t kMediaKey[] = L"#media";
+constexpr uint64_t kMediaImageBase = 0x4000000000000000ull; // album art ids, apart from the apps' icon ids
 // Bar entries and the clock start with '#'; app keys are AUMIDs or paths.
 bool IsEntry(const std::wstring& key) { return !key.empty() && key[0] == L'#'; }
 constexpr double kInsetDip = 14; // room for the drop shadow around the shape
@@ -737,6 +739,8 @@ LRESULT Bar::OnInput(HWND h, UINT m, WPARAM w, LPARAM l)
                 onNotifyClick(anchor);
             else if (key == kVpnKey && onVpnClick)
                 onVpnClick(anchor);
+            else if (key == kMediaKey && onMediaClick)
+                onMediaClick();
             else if (key == kTrayKey && onTrayClick)
                 onTrayClick(anchor);
             else if (key == kDesktopKey && onDesktopClick)
@@ -1099,6 +1103,7 @@ void Bar::Relayout()
     const bool showNotifications = showRight && st.showNotifications;
     const bool showDesktop = showRight && st.showDesktop;
     const bool showVpn = showRight && st.showVpn;
+    const bool showMedia = showRight && st.showMedia && media_.present && !media_.title.empty();
 
     // Metrics (px). Every icon sits centred on a square plate (press and drag
     // feedback); the plate has the same gap `v` to the top and bottom edge,
@@ -1133,7 +1138,8 @@ void Bar::Relayout()
     const int statusExtra = st.statusStyle == L"icons" ? int(std::lround(icon * 1.3f)) : 0;
     // Show Desktop: a narrow slot at the bar's right end, a thin line in it, as the system taskbar's.
     const int deskW = showDesktop ? std::max(Px(10, s), int(std::lround(icon * 0.45))) : 0;
-    const int rightCount = int(showTray) + int(showIme) + int(showStatus) + int(showVpn) + int(showNotifications) + int(clockW != 0) + int(showDesktop);
+    const int rightCount =
+        int(showMedia) + int(showTray) + int(showIme) + int(showStatus) + int(showVpn) + int(showNotifications) + int(clockW != 0) + int(showDesktop);
     const int groupGap = rightCount ? sepGap : 0;
     const int total = int(items_.size());
     badges_ = ComputeBadges();
@@ -1145,7 +1151,8 @@ void Bar::Relayout()
         int w = 2 * padFor(p) + p + 2 * g;               // logo and the air after it
         w += slots ? slots * p + (slots - 1) * g : 0;    // apps
         if (rightCount)
-            w += 2 * sepGap + p * (int(showTray) + int(showIme) + int(showStatus) + int(showVpn) + int(showNotifications)) + (showStatus ? statusExtra : 0) + clockW +
+            w += 2 * sepGap + p * (int(showMedia) + int(showTray) + int(showIme) + int(showStatus) + int(showVpn) + int(showNotifications)) +
+                 (showStatus ? statusExtra : 0) + clockW +
                  deskW +
                  (rightCount - 1) * g;
         return std::max(w, barH * 2);
@@ -1294,6 +1301,7 @@ void Bar::Relayout()
     const int statusLeft = rightSlot(statusW, showStatus), statusRight = statusLeft + statusW;
     const int imeLeft = rightSlot(plate, showIme);
     const int trayLeft = rightSlot(plate, showTray);
+    const int mediaLeft = rightSlot(plate, showMedia);
     const int rightLeft = rightCount ? cursor + gap : insetX + barW - pad;
     const int appsMin = startLeft + plate + 2 * gap;
     const int slots = n + (more ? 1 : 0);
@@ -1355,6 +1363,17 @@ void Bar::Relayout()
     plate_ = plate;
     shown_ = n;
     scene.separatorX = rightCount ? float(rightLeft - sepGap) : -1;
+    if (showMedia) {
+        // What is playing: the album art (a note without one), a green dot while it plays.
+        SceneItem m = entry(kMediaKey, mediaLeft, media_.art ? L"" : L"");
+        if (media_.art) {
+            m.image = media_.art;
+            m.imageId = kMediaImageBase | media_.artId;
+        }
+        m.lit = media_.playing;
+        scene.extras.push_back(std::move(m));
+        hits_.push_back({kMediaKey, RECT{mediaLeft - gap / 2, hitTop, mediaLeft + plate + gap / 2, hitBottom}});
+    }
     if (showTray) {
         scene.extras.push_back(entry(kTrayKey, trayLeft, L"\uE70E"));
         hits_.push_back({kTrayKey, RECT{trayLeft - gap / 2, hitTop, trayLeft + plate + gap / 2, hitBottom}});
@@ -1816,6 +1835,18 @@ void Bar::GuardStacking(const wchar_t* why)
     }
 }
 
+void Bar::SetMedia(const NowPlaying& now)
+{
+    // The position moves every second; only what the entry shows asks for a new layout.
+    const bool same = now.present == media_.present && now.title == media_.title && now.artist == media_.artist && now.playing == media_.playing &&
+                      now.artId == media_.artId;
+    media_ = now;
+    if (same)
+        return;
+    Relayout();
+    UpdateTooltips();
+}
+
 void Bar::SetStatus(const SystemStatus& status)
 {
     if (status == status_)
@@ -1882,6 +1913,8 @@ std::wstring Bar::TooltipText(const std::wstring& key) const
         return Tr(L"Input method");
     if (key == kDesktopKey)
         return Tr(L"Show Desktop");
+    if (key == kMediaKey)
+        return media_.artist.empty() ? media_.title : media_.title + L" — " + media_.artist;
     if (key == kVpnKey)
         return status_.vpn.empty() ? Tr(L"VPN · not connected") : TrFormat(L"VPN · %s", status_.vpn.c_str());
     if (key == kStatusKey) {

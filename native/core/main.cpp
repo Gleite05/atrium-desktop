@@ -113,6 +113,7 @@ struct App {
     std::unique_ptr<StartMenu> start;
     std::unique_ptr<Notifications> notes;
     std::unique_ptr<NotificationListener> listener;
+    std::unique_ptr<MediaSource> media; // what is playing, for the bar's media entry (showMedia)
     std::unique_ptr<UsbVolumeMonitor> usb;
     std::unique_ptr<UpdateChecker> updates;
     std::unique_ptr<WeChatSource> wechat;
@@ -649,6 +650,13 @@ void ApplySettings(const Settings& s)
         g_app.listener = std::make_unique<NotificationListener>(g_app.host, WM_NOTICE, WM_TOASTS);
     else if (!(s.bar && toasts) && g_app.listener)
         g_app.listener.reset();
+    if (s.bar && s.showMedia && !g_app.media) {
+        g_app.media = std::make_unique<MediaSource>(g_app.host, WM_BAR_MEDIA);
+        g_app.media->SetActive(true);
+    } else if (!(s.bar && s.showMedia) && g_app.media) {
+        g_app.media.reset();
+        ForBars([](Bar& bar) { bar.SetMedia(NowPlaying{}); });
+    }
     if (s.bar && s.notifyWeChat && !g_app.wechat)
         g_app.wechat = std::make_unique<WeChatSource>(g_app.host, WM_NOTICE);
     else if (!(s.bar && s.notifyWeChat) && g_app.wechat)
@@ -1147,6 +1155,10 @@ void ConfigureBar(Bar& bar)
     bar.onDesktopClick = [] { SendWinShortcut('D'); }; // the system's Show Desktop: a second click brings the windows back
     bar.onStatusClick = ToggleControl;
     bar.onVpnClick = ToggleVpn;
+    bar.onMediaClick = [] {
+        if (g_app.media)
+            g_app.media->Do(MediaAction::PlayPause);
+    };
     bar.onImeClick = [] {
         if (g_app.imeWatcher)
             g_app.imeWatcher->Toggle();
@@ -1361,6 +1373,12 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l)
             g_app.start->Refresh();
         return 0;
     case WM_VOLUME: UpdateStatus(); return 0;
+    case WM_BAR_MEDIA:
+        if (g_app.media) {
+            const NowPlaying now = g_app.media->Latest();
+            ForBars([&](Bar& bar) { bar.SetMedia(now); });
+        }
+        return 0;
     case WM_TOASTS: {
         auto toasts = TakePosted<std::vector<ToastEntry>>(l);
         ForBars([&](Bar& bar) { bar.SetToasts(*toasts); });

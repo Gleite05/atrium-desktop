@@ -405,7 +405,7 @@ void BarPainter::DrawContent(ID2D1DeviceContext2* d2d, const BarScene& scene, In
 
     usedBitmaps_.clear();
     for (const auto& it : scene.extras) { // the right group follows the clock's ink, the others the apps'
-        bool right = it.key == L"#notify" || it.key == L"#tray" || it.key == L"#status" || it.key == L"#vpn";
+        bool right = it.key == L"#notify" || it.key == L"#tray" || it.key == L"#status" || it.key == L"#vpn" || it.key == L"#media";
         DrawItem(d2d, scene, it, brush.get(), right ? inkFor(darkText) : ink, right ? washFor(darkText) : wash);
     }
     for (const auto& [key, m] : motion_)

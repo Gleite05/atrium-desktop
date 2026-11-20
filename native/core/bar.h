@@ -23,6 +23,7 @@
 #include "shell/task_model.h"
 #include "shell/displays.h"
 #include "shell/notification_listener.h"
+#include "shell/now_playing.h"
 
 #include <windows.h>
 #include <dwrite_3.h>
@@ -74,6 +75,8 @@ public:
     void RefreshBadges(); // titles change without a relayout: called now and then
     // Network, battery and volume for the status icon.
     void SetStatus(const SystemStatus& status);
+    // What is playing: its album art as the first right-hand entry (a green dot while it plays).
+    void SetMedia(const NowPlaying& now);
     // The foreground window's input (中/a/A) in the input method entry; empty: not known.
     void SetIme(const std::wstring& glyph);
     // The app at `index` (0-based, in bar order) as a click on it would (Win + digit).
@@ -104,6 +107,7 @@ public:
     std::function<void(RECT anchor)> onStartClick;  // the Atrium logo
     std::function<void(RECT anchor)> onNotifyClick; // the notification bell
     std::function<void(RECT anchor)> onVpnClick;    // the VPN entry next to the bell
+    std::function<void()> onMediaClick;             // the media entry: play / pause
     std::function<void(RECT anchor)> onTrayClick;   // the tray entry (Atrium's tray panel)
     std::function<void()> onDesktopClick;           // the Show Desktop slot at the bar's right end
     std::function<void(RECT anchor)> onStatusClick; // the status icon (Wi-Fi, battery: the control centre)
@@ -237,6 +241,7 @@ private:
     std::vector<std::wstring> hidden_; // apps behind the overflow entry
     int unread_ = 0;
     SystemStatus status_;
+    NowPlaying media_;
     bool belowTray_ = false;   // yielded to the system taskbar the user is using
     bool trayHeldUp_ = false;  // the system taskbar is up without the user (logged once)
     HWND previousForeground_ = nullptr;

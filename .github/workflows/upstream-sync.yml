@@ -1,0 +1,55 @@
+name: upstream-sync
+
+# Uma vez por semana tenta juntar as novidades do Atrium oficial (wynter-yaxley/atrium-desktop, main) ao ramo vpn.
+#  - sem conflitos: empurra o ramo upstream-sync e abre um PR para vpn (ou um issue, se o repositório
+#    não deixar o Actions abrir PRs)
+#  - com conflitos: abre um issue com a lista de ficheiros a resolver à mão
+on:
+  schedule:
+    - cron: '0 7 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: vpn
+          fetch-depth: 0
+
+      - name: Junta upstream/main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "Gonçalo Leite"
+          git config user.email "207007742+Gleite05@users.noreply.github.com"
+          git remote add upstream https://github.com/wynter-yaxley/atrium-desktop.git
+          git fetch upstream main
+          novos=$(git rev-list --count HEAD..upstream/main)
+          echo "Commits novos no Atrium oficial: $novos"
+          if [ "$novos" = "0" ]; then exit 0; fi
+
+          git checkout -B upstream-sync
+          if git merge --no-edit upstream/main; then
+            git push -f origin upstream-sync
+            if ! gh pr view upstream-sync --json state -q .state 2>/dev/null | grep -q OPEN; then
+              gh pr create --base vpn --head upstream-sync \
+                --title "Novidades do Atrium oficial ($novos commits)" \
+                --body "Merge automático de upstream/main sem conflitos. Depois de juntar ao vpn, o workflow **atrium** do Windows-2.0 recompila e atualiza a Release na segunda-feira seguinte (ou corre-o à mão)." \
+              || gh issue create --title "Novidades do Atrium oficial ($novos commits) prontas" \
+                   --body "O ramo upstream-sync já tem o merge sem conflitos. Abre o PR para vpn à mão: https://github.com/${GITHUB_REPOSITORY}/compare/vpn...upstream-sync"
+            fi
+          else
+            ficheiros=$(git diff --name-only --diff-filter=U | sed 's/^/- /')
+            git merge --abort
+            if ! gh issue list --state open --search "merge com conflitos in:title" --json number -q '.[0].number' | grep -q .; then
+              printf 'O merge automático de upstream/main no ramo vpn tem conflitos em:\n\n%s\n\nResolver à mão: git fetch upstream && git merge upstream/main\n' "$ficheiros" > corpo.md
+              gh issue create --title "Atrium oficial: merge com conflitos ($novos commits)" --body-file corpo.md
+            fi
+          fi
