@@ -4,6 +4,8 @@ name: fork-build
 on:
   push:
     branches: [vpn]
+  pull_request:
+    branches: [vpn]
   workflow_dispatch:
 
 permissions:
